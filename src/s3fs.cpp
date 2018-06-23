@@ -2600,7 +2600,7 @@ static int list_bucket(const char* path, S3ObjList& head, const char* marker, co
   query_maxkey += "max-keys=1000";
 
   string each_query = query_delimiter;
-  if(marker != "") {
+  if(marker != NULL) {
   each_query += "marker=" + urlEncode(marker) + "&";
   }
   each_query += query_maxkey;
@@ -2650,7 +2650,8 @@ static int list_bucket(const char* path, S3ObjList& head, const char* marker, co
   
   // reset(initialize) curl object
   s3fscurl.DestroyCurlHandle();
-  *next_marker = nt_marker.c_str();
+  vector<char> cstr(str.c_str(), str.c_str() + str.size() + 1);
+  *next_marker = cstr;
   S3FS_MALLOCTRIM(0);
 
   return 0;
