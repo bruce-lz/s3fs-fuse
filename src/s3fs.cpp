@@ -2578,7 +2578,9 @@ static int list_bucket(const char* path, S3ObjList& head, const char* marker, co
   string    query_maxkey;
   S3fsCurl  s3fscurl;
   xmlDocPtr doc;
-  string nt_marker = *next_marker;
+  string nt_marker;
+  if (*next_marker != NULL)
+   nt_marker = *next_marker;
   
   S3FS_PRN_INFO1("[path=%s]", path);
 
