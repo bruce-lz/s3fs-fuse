@@ -2468,8 +2468,6 @@ static int s3fs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off
   }
   S3FS_MALLOCTRIM(0);
 
-  if (result == 0 && is_truncated)
-    result = 1;
   return result;
 }
 
