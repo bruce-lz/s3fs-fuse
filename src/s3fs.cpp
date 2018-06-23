@@ -159,8 +159,9 @@ static int check_parent_object_access(const char* path, int mask);
 static FdEntity* get_local_fent(const char* path, bool is_load = false);
 static bool multi_head_callback(S3fsCurl* s3fscurl);
 static S3fsCurl* multi_head_retry_callback(S3fsCurl* s3fscurl);
-static int readdir_multi_head(const char* path, S3ObjList& head, void* buf, fuse_fill_dir_t filler);
+static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated, void* buf, fuse_fill_dir_t filler);
 static int list_bucket(const char* path, S3ObjList& head, const char* delimiter, bool check_content_only = false);
+static int list_bucket(const char* path, S3ObjList& head, const char* marker, const char* delimiter, bool* truncated, char** next_marker);
 static int directory_empty(const char* path);
 static bool is_truncated(xmlDocPtr doc);
 static int append_objects_from_xml_ex(const char* path, xmlDocPtr doc, xmlXPathContextPtr ctx, 
@@ -2337,13 +2338,14 @@ static S3fsCurl* multi_head_retry_callback(S3fsCurl* s3fscurl)
   return newcurl;
 }
 
-static int readdir_multi_head(const char* path, S3ObjList& head, void* buf, fuse_fill_dir_t filler)
+static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated, void* buf, fuse_fill_dir_t filler)
 {
   S3fsMultiCurl curlmulti;
   s3obj_list_t  headlist;
   s3obj_list_t  fillerlist;
   int           result = 0;
-
+  int offset = truncated;
+  
   S3FS_PRN_INFO1("[path=%s][list=%zu]", path, headlist.size());
 
   // Make base path list.
@@ -2354,7 +2356,7 @@ static int readdir_multi_head(const char* path, S3ObjList& head, void* buf, fuse
   curlmulti.SetRetryCallback(multi_head_retry_callback);
 
   // Loop
-  while(!headlist.empty()){
+  while(!headlist.empty()) {
     s3obj_list_t::iterator iter;
     long                   cnt;
 
@@ -2392,14 +2394,14 @@ static int readdir_multi_head(const char* path, S3ObjList& head, void* buf, fuse
     }
 
     // Multi request
-    if(0 != (result = curlmulti.Request())){
+    if(0 != (result = curlmulti.Request())) {
       // If result is -EIO, it is something error occurred.
       // This case includes that the object is encrypting(SSE) and s3fs does not have keys.
       // So s3fs set result to 0 in order to continue the process.
-      if(-EIO == result){
+      if(-EIO == result) {
         S3FS_PRN_WARN("error occurred in multi request(errno=%d), but continue...", result);
         result = 0;
-      }else{
+      } else {
         S3FS_PRN_ERR("error occurred in multi request(errno=%d).", result);
         break;
       }
@@ -2408,14 +2410,14 @@ static int readdir_multi_head(const char* path, S3ObjList& head, void* buf, fuse
     // populate fuse buffer
     // here is best position, because a case is cache size < files in directory
     //
-    for(iter = fillerlist.begin(); fillerlist.end() != iter; ++iter){
+    for(iter = fillerlist.begin(); fillerlist.end() != iter; ++iter) {
       struct stat st;
       string bpath = mybasename((*iter));
-      if(StatCache::getStatCacheData()->GetStat((*iter), &st)){
-        filler(buf, bpath.c_str(), &st, 0);
-      }else{
+      if(StatCache::getStatCacheData()->GetStat((*iter), &st)) {
+        filler(buf, bpath.c_str(), &st, offset);
+      } else {
         S3FS_PRN_INFO2("Could not find %s file in stat cache.", (*iter).c_str());
-        filler(buf, bpath.c_str(), 0, 0);
+        filler(buf, bpath.c_str(), 0, offset);
       }
     }
 
@@ -2429,36 +2431,45 @@ static int s3fs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off
 {
   S3ObjList head;
   int result;
-
+  static char* next_entry;
+  bool is_truncated = false;
   S3FS_PRN_INFO("[path=%s]", path);
 
   if(0 != (result = check_object_access(path, X_OK, NULL))){
     return result;
   }
 
+  if (offset <= 0)
+  {
+    free(next_entry);
+    next_entry = NULL;
+    filler(buf, ".", 0, 0);
+    filler(buf, "..", 0, 0);
+  }
   // get a list of all the objects
-  if((result = list_bucket(path, head, "/")) != 0){
+  if((result = list_bucket(path, head, next_entry, "/", &is_truncated, &next_entry)) != 0){
     S3FS_PRN_ERR("list_bucket returns error(%d).", result);
     return result;
   }
 
   // force to add "." and ".." name.
-  filler(buf, ".", 0, 0);
-  filler(buf, "..", 0, 0);
-  if(head.IsEmpty()){
+
+  if(head.IsEmpty()) {
     return 0;
   }
 
   // Send multi head request for stats caching.
   string strpath = path;
-  if(strcmp(path, "/") != 0){
+  if(strcmp(path, "/") != 0) {
     strpath += "/";
   }
-  if(0 != (result = readdir_multi_head(strpath.c_str(), head, buf, filler))){
+  if(0 != (result = readdir_multi_head(strpath.c_str(), head, is_truncated, buf, filler))) {
     S3FS_PRN_ERR("readdir_multi_head returns error(%d).", result);
   }
   S3FS_MALLOCTRIM(0);
 
+  if (result == 0 && is_truncated)
+    result = 1;
   return result;
 }
 
@@ -2483,21 +2494,21 @@ static int list_bucket(const char* path, S3ObjList& head, const char* delimiter,
 
   query_prefix += "&prefix=";
   s3_realpath = get_realpath(path);
-  if(0 == s3_realpath.length() || '/' != s3_realpath[s3_realpath.length() - 1]){
+  if(0 == s3_realpath.length() || '/' != s3_realpath[s3_realpath.length() - 1]) {
     // last word must be "/"
     query_prefix += urlEncode(s3_realpath.substr(1) + "/");
-  }else{
+  } else {
     query_prefix += urlEncode(s3_realpath.substr(1));
   }
-  if (check_content_only){
+  if (check_content_only) {
     // Just need to know if there are child objects in dir
     // For dir with children, expect "dir/" and "dir/child"
     query_maxkey += "max-keys=2";
-  }else{
+  } else {
     query_maxkey += "max-keys=1000";
   }
 
-  while(truncated){
+  while(truncated) {
     string each_query = query_delimiter;
     if(next_marker != ""){
       each_query += "marker=" + urlEncode(next_marker) + "&";
@@ -2558,6 +2569,95 @@ static int list_bucket(const char* path, S3ObjList& head, const char* delimiter,
 
   return 0;
 }
+
+static int list_bucket(const char* path, S3ObjList& head, const char* marker, const char* delimiter, bool* truncated, char** next_marker)
+{
+  string    s3_realpath;
+  string    query_delimiter;
+  string    query_prefix;
+  string    query_maxkey;
+  S3fsCurl  s3fscurl;
+  xmlDocPtr doc;
+  string nt_marker = *next_marker;
+  
+  S3FS_PRN_INFO1("[path=%s]", path);
+
+  if(delimiter && 0 < strlen(delimiter)){
+    query_delimiter += "delimiter=";
+    query_delimiter += delimiter;
+    query_delimiter += "&";
+  }
+
+  query_prefix += "&prefix=";
+  s3_realpath = get_realpath(path);
+  if(0 == s3_realpath.length() || '/' != s3_realpath[s3_realpath.length() - 1]) {
+    // last word must be "/"
+    query_prefix += urlEncode(s3_realpath.substr(1) + "/");
+  } else {
+    query_prefix += urlEncode(s3_realpath.substr(1));
+  }
+
+  query_maxkey += "max-keys=1000";
+
+  string each_query = query_delimiter;
+  if(marker != "") {
+  each_query += "marker=" + urlEncode(marker) + "&";
+  }
+  each_query += query_maxkey;
+  each_query += query_prefix;
+  
+  // request
+  int result; 
+  if(0 != (result = s3fscurl.ListBucketRequest(path, each_query.c_str()))){
+  S3FS_PRN_ERR("ListBucketRequest returns with error.");
+  return result;
+  }
+  BodyData* body = s3fscurl.GetBodyData();
+  
+  // xmlDocPtr
+  if(NULL == (doc = xmlReadMemory(body->str(), static_cast<int>(body->size()), "", NULL, 0))){
+  S3FS_PRN_ERR("xmlReadMemory returns with error.");
+  return -1;
+  }
+  if(0 != append_objects_from_xml(path, doc, head)) {
+  S3FS_PRN_ERR("append_objects_from_xml returns with error.");
+  xmlFreeDoc(doc);
+  return -1;
+  }
+  if(true == (*truncated = is_truncated(doc))) {
+    xmlChar*	tmpch = get_next_marker(doc);
+    if(tmpch) {
+      nt_marker = (char*)tmpch;
+      xmlFree(tmpch);
+    } else {
+      // If did not specify "delimiter", s3 did not return "NextMarker".
+      // On this case, can use last name for next marker.
+      //
+      string lastname;
+      if(!head.GetLastName(lastname)) {
+        S3FS_PRN_WARN("Could not find next marker, thus break loop.");
+        *truncated = false;
+      } else {
+        nt_marker = s3_realpath.substr(1);
+        if(0 == s3_realpath.length() || '/' != s3_realpath[s3_realpath.length() - 1]) {
+          nt_marker += "/";
+        }
+        nt_marker += lastname;
+      }
+    }
+  }
+  S3FS_XMLFREEDOC(doc);
+  
+  // reset(initialize) curl object
+  s3fscurl.DestroyCurlHandle();
+  *next_marker = nt_marker.c_str();
+  S3FS_MALLOCTRIM(0);
+
+  return 0;
+}
+
+
+
 
 static const char* c_strErrorObjectName = "FILE or SUBDIR in DIR";
 
