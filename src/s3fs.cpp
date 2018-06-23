@@ -2650,8 +2650,10 @@ static int list_bucket(const char* path, S3ObjList& head, const char* marker, co
   
   // reset(initialize) curl object
   s3fscurl.DestroyCurlHandle();
-  vector<char> cstr(str.c_str(), str.c_str() + str.size() + 1);
-  *next_marker = cstr;
+  if(*next_marker != NULL) {
+    free(*next_marker);
+  }
+  *next_marker = strdup(nt_marker.c_str());
   S3FS_MALLOCTRIM(0);
 
   return 0;
