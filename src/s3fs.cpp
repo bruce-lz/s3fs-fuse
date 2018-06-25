@@ -2638,7 +2638,8 @@ static int list_bucket(const char* path, S3ObjList& head, const char* marker, co
       if(!head.GetLastName(lastname)) {
         S3FS_PRN_WARN("Could not find next marker, thus break loop.");
         *truncated = false;
-      } else {
+      }  
+      {
         nt_marker = s3_realpath.substr(1);
         if(0 == s3_realpath.length() || '/' != s3_realpath[s3_realpath.length() - 1]) {
           nt_marker += "/";
