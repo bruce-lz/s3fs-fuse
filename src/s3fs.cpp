@@ -2414,10 +2414,10 @@ static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated,
       struct stat st;
       string bpath = mybasename((*iter));
       if(StatCache::getStatCacheData()->GetStat((*iter), &st)) {
-        filler(buf, bpath.c_str(), &st, offset);
+        filler(buf, bpath.c_str(), &st, 0);
       } else {
         S3FS_PRN_INFO2("Could not find %s file in stat cache.", (*iter).c_str());
-        filler(buf, bpath.c_str(), 0, offset);
+        filler(buf, bpath.c_str(), 0, 0);
       }
     }
 
