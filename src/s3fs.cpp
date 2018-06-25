@@ -2436,6 +2436,11 @@ static int s3fs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off
   bool is_truncated = false;
   S3FS_PRN_INFO("[path=%s]", path);
 
+  if (offset > 0 && offset % 1000 != 0)
+  {
+    return 0;
+  }
+  
   if(0 != (result = check_object_access(path, X_OK, NULL))){
     return result;
   }
