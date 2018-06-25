@@ -2344,7 +2344,7 @@ static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated,
   s3obj_list_t  headlist;
   s3obj_list_t  fillerlist;
   int           result = 0;
-  int offset = truncated;
+  int offset = 0;
   
   S3FS_PRN_INFO1("[path=%s][list=%zu]", path, headlist.size());
 
@@ -2411,13 +2411,15 @@ static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated,
     // here is best position, because a case is cache size < files in directory
     //
     for(iter = fillerlist.begin(); fillerlist.end() != iter; ++iter) {
+      if (truncated)
+      	offset += 1;
       struct stat st;
       string bpath = mybasename((*iter));
       if(StatCache::getStatCacheData()->GetStat((*iter), &st)) {
-        filler(buf, bpath.c_str(), &st, 0);
+        filler(buf, bpath.c_str(), &st, offset);
       } else {
         S3FS_PRN_INFO2("Could not find %s file in stat cache.", (*iter).c_str());
-        filler(buf, bpath.c_str(), 0, 0);
+        filler(buf, bpath.c_str(), 0, offset);
       }
     }
 
