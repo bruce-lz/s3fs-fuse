@@ -2411,10 +2411,10 @@ static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated,
     // here is best position, because a case is cache size < files in directory
     //
     for(iter = fillerlist.begin(); fillerlist.end() != iter; ++iter) {
-      if (truncated)
-      	offset += 1;
       struct stat st;
       string bpath = mybasename((*iter));
+      if (truncated)
+      	offset += bpath.length();
       if(StatCache::getStatCacheData()->GetStat((*iter), &st)) {
         filler(buf, bpath.c_str(), &st, offset);
       } else {
@@ -2584,7 +2584,7 @@ static int list_bucket(const char* path, S3ObjList& head, const char* marker, co
   
   S3FS_PRN_INFO1("[path=%s]", path);
 
-  if(delimiter && 0 < strlen(delimiter)){
+  if(delimiter && 0 < strlen(delimiter)) {
     query_delimiter += "delimiter=";
     query_delimiter += delimiter;
     query_delimiter += "&";
@@ -2603,7 +2603,7 @@ static int list_bucket(const char* path, S3ObjList& head, const char* marker, co
 
   string each_query = query_delimiter;
   if(marker != NULL) {
-  each_query += "marker=" + urlEncode(marker) + "&";
+    each_query += "marker=" + urlEncode(marker) + "&";
   }
   each_query += query_maxkey;
   each_query += query_prefix;
@@ -2611,20 +2611,20 @@ static int list_bucket(const char* path, S3ObjList& head, const char* marker, co
   // request
   int result; 
   if(0 != (result = s3fscurl.ListBucketRequest(path, each_query.c_str()))){
-  S3FS_PRN_ERR("ListBucketRequest returns with error.");
-  return result;
+    S3FS_PRN_ERR("ListBucketRequest returns with error.");
+    return result;
   }
   BodyData* body = s3fscurl.GetBodyData();
   
   // xmlDocPtr
   if(NULL == (doc = xmlReadMemory(body->str(), static_cast<int>(body->size()), "", NULL, 0))){
-  S3FS_PRN_ERR("xmlReadMemory returns with error.");
-  return -1;
+    S3FS_PRN_ERR("xmlReadMemory returns with error.");
+    return -1;
   }
   if(0 != append_objects_from_xml(path, doc, head)) {
-  S3FS_PRN_ERR("append_objects_from_xml returns with error.");
-  xmlFreeDoc(doc);
-  return -1;
+    S3FS_PRN_ERR("append_objects_from_xml returns with error.");
+    xmlFreeDoc(doc);
+    return -1;
   }
   if(true == (*truncated = is_truncated(doc))) {
     xmlChar*	tmpch = get_next_marker(doc);
