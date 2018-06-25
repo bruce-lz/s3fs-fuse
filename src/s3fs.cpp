@@ -159,7 +159,7 @@ static int check_parent_object_access(const char* path, int mask);
 static FdEntity* get_local_fent(const char* path, bool is_load = false);
 static bool multi_head_callback(S3fsCurl* s3fscurl);
 static S3fsCurl* multi_head_retry_callback(S3fsCurl* s3fscurl);
-static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated, void* buf, fuse_fill_dir_t filler);
+static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated, int off, void* buf, fuse_fill_dir_t filler);
 static int list_bucket(const char* path, S3ObjList& head, const char* delimiter, bool check_content_only = false);
 static int list_bucket(const char* path, S3ObjList& head, const char* marker, const char* delimiter, bool* truncated, char** next_marker);
 static int directory_empty(const char* path);
@@ -2338,13 +2338,13 @@ static S3fsCurl* multi_head_retry_callback(S3fsCurl* s3fscurl)
   return newcurl;
 }
 
-static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated, void* buf, fuse_fill_dir_t filler)
+static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated, int off, void* buf, fuse_fill_dir_t filler)
 {
   S3fsMultiCurl curlmulti;
   s3obj_list_t  headlist;
   s3obj_list_t  fillerlist;
   int           result = 0;
-  int offset = 0;
+  int offset = off;
   
   S3FS_PRN_INFO1("[path=%s][list=%zu]", path, headlist.size());
 
@@ -2413,8 +2413,7 @@ static int readdir_multi_head(const char* path, S3ObjList& head, bool truncated,
     for(iter = fillerlist.begin(); fillerlist.end() != iter; ++iter) {
       struct stat st;
       string bpath = mybasename((*iter));
-      if (truncated)
-      	offset += bpath.length();
+      offset += 1;
       if(StatCache::getStatCacheData()->GetStat((*iter), &st)) {
         filler(buf, bpath.c_str(), &st, offset);
       } else {
@@ -2465,7 +2464,7 @@ static int s3fs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off
   if(strcmp(path, "/") != 0) {
     strpath += "/";
   }
-  if(0 != (result = readdir_multi_head(strpath.c_str(), head, is_truncated, buf, filler))) {
+  if(0 != (result = readdir_multi_head(strpath.c_str(), head, (int)offset, is_truncated, buf, filler))) {
     S3FS_PRN_ERR("readdir_multi_head returns error(%d).", result);
   }
   S3FS_MALLOCTRIM(0);
