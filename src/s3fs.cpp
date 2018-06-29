@@ -596,7 +596,10 @@ static int check_object_access(const char* path, int mask, struct stat* pstbuf)
   if(NULL == (pcxt = fuse_get_context())){
     return -EIO;
   }
-  if(0 != (result = get_object_attribute(path, pst))){
+  FdEntity*   ent;
+  if(NULL != (ent = FdManager::get()->ExistOpen(path))) {
+    ent->GetStats(*pst);
+  } else if(0 != (result = get_object_attribute(path, pst))){
     // If there is not the target file(object), result is -ENOENT.
     return result;
   }
@@ -839,7 +842,7 @@ static int put_headers(const char* path, headers_t& meta, bool is_copy)
 static int s3fs_getattr(const char* path, struct stat* stbuf)
 {
   int result;
-
+  
   S3FS_PRN_INFO("[path=%s]", path);
 
   // check parent directory attribute.
@@ -1016,16 +1019,21 @@ static int s3fs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
   }else if(0 != result){
     return result;
   }
-  result = create_file_object(path, mode, pcxt->uid, pcxt->gid);
+  //result = create_file_object(path, mode, pcxt->uid, pcxt->gid);
   StatCache::getStatCacheData()->DelStat(path);
-  if(result != 0){
-    return result;
-  }
+  //if(result != 0){
+    //return result;
+  //}
 
 
   FdEntity*   ent;
   headers_t   meta;
-  get_object_attribute(path, NULL, &meta, true, NULL, true);    // no truncate cache
+  meta["Content-Type"]     = S3fsCurl::LookupMimeType(string(path));
+  meta["x-amz-meta-uid"]   = str(pcxt->uid);
+  meta["x-amz-meta-gid"]   = str(pcxt->gid);
+  meta["x-amz-meta-mode"]  = str(mode);
+  meta["x-amz-meta-mtime"] = str(time(NULL));
+  //get_object_attribute(path, NULL, &meta, true, NULL, true);    // no truncate cache
   if(NULL == (ent = FdManager::get()->Open(path, &meta, 0, -1, false, true))){
     StatCache::getStatCacheData()->DelStat(path);
     return -EIO;

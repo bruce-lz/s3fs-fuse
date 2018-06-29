@@ -838,6 +838,9 @@ mode_t get_mode(headers_t& meta, const char* path, bool checkdir, bool forcedir)
               mode |= S_IFREG;
             }
           }else{
+          if(path && 0 < strlen(path) && '/' == path[strlen(path) - 1])
+	    mode |= S_IFDIR;
+	  else
             mode |= S_IFREG;
           }
         }
